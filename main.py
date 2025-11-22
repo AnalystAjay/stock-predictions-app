@@ -3,11 +3,10 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
-from datetime import datetime
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("🚀 Ultimate Stock Prediction Dashboard (Fixed, No MySQL)")
+st.title("🚀 Ultimate Stock Prediction Dashboard (Fully Safe & Fixed)")
 
 # --- Fetch stock data from yfinance ---
 def fetch_stock_data(ticker, days=30):
@@ -18,23 +17,33 @@ def fetch_stock_data(ticker, days=30):
         df.dropna(inplace=True)
     return df
 
-# --- Predict next day using Linear Regression ---
-def predict_next_day(df):
+# --- Predict next day using Linear Regression with train/test split ---
+def predict_next_day(df, split_ratio=0.9):
     if df.empty:
-        return None, None
-    X = np.arange(len(df)).reshape(-1,1)  # use numeric index
-    y = df['Close'].values
+        return None, None, None
+    split_index = int(len(df) * split_ratio)
+    
+    # Training set
+    X_train = np.arange(split_index).reshape(-1,1)
+    y_train = df['Close'].iloc[:split_index].values
+    
+    # Test set
+    X_test = np.arange(split_index, len(df)).reshape(-1,1)
+    y_test = df['Close'].iloc[split_index:].values
+    
+    # Train model
     model = LinearRegression()
-    model.fit(X, y)
-    next_day_index = np.array([[len(df)]])
-    pred = float(model.predict(next_day_index)[0])
-    return round(pred,2), model
-
-# --- Accuracy calculation ---
-def calculate_accuracy(pred, actual):
-    if actual is None:
-        return None
-    return round(1 - abs(pred - actual)/actual, 4)
+    model.fit(X_train, y_train)
+    
+    # Predict next day
+    pred_next = float(model.predict(np.array([[len(df)]]))[0])
+    
+    # Accuracy on last test point
+    accuracy = None
+    if len(y_test) > 0:
+        accuracy = 1 - abs(model.predict(X_test)[-1] - y_test[-1]) / y_test[-1]
+    
+    return pred_next, model, accuracy
 
 # --- Main App ---
 tickers_input = st.text_input("Enter Stock Tickers (comma separated)", "^GSPC, AAPL, MSFT")
@@ -42,12 +51,10 @@ days_input = st.number_input("Days of History", min_value=10, max_value=365, val
 
 if tickers_input:
     tickers = [t.strip().upper() for t in tickers_input.split(",")]
-    
     all_pred_data = []
-    
+
     for ticker in tickers:
         df = fetch_stock_data(ticker, days_input)
-        
         if df.empty:
             st.warning(f"No data available for {ticker}. Skipping.")
             continue
@@ -55,15 +62,18 @@ if tickers_input:
         st.subheader(f"📈 Last {days_input} Days Data: {ticker}")
         st.dataframe(df[['Date','Open','High','Low','Close','Volume']])
         
-        pred, model = predict_next_day(df)
+        pred, model, accuracy = predict_next_day(df)
         if pred is None or model is None:
             st.warning(f"Prediction not available for {ticker}")
             continue
         
-        actual_today = df['Close'].iloc[-1] if not df.empty else None
-        accuracy = calculate_accuracy(pred, actual_today)
+        # ✅ Safe metric display
+        if accuracy is None or (isinstance(accuracy, float) and np.isnan(accuracy)):
+            accuracy_display = "N/A"
+        else:
+            accuracy_display = f"{accuracy*100:.2f}%"
         
-        st.metric(label=f"{ticker} Predicted Next Day Close", value=pred, delta=f"Accuracy: {accuracy*100 if accuracy else 'N/A'}%")
+        st.metric(label=f"{ticker} Predicted Next Day Close", value=pred, delta=f"Accuracy: {accuracy_display}")
         
         # --- Prepare dataframe for plotting ---
         df_plot = df[['Date','Close']].copy()
