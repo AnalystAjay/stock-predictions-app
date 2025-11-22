@@ -5,24 +5,26 @@ import mysql.connector
 from mysql.connector import Error
 from sklearn.linear_model import LinearRegression
 from datetime import datetime
-import plotly.express as px
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("🚀 Ultimate Stock Prediction Dashboard")
+st.title(" Stock Prediction Dashboard (MySQL Fixed)")
 
 # --- MySQL connection ---
 def get_connection():
     try:
         conn = mysql.connector.connect(
-            host='localhost',
-            user='ajay',
-            password='Ajay@123',
-            database='stock_app'
+            host='127.0.0.1',        # Use 127.0.0.1 instead of 'localhost'
+            user='root',
+            password='Sumo$%23',
+            database='sp500 database',
+            port=3306
         )
-        return conn
+        if conn.is_connected():
+            st.success("🎉 Connected to MySQL successfully!")
+            return conn
     except Error as e:
-        st.error(f"MySQL Connection Error: {e}")
+        st.error(f"❌ Error connecting to MySQL: {e}")
         return None
 
 # --- Fetch stock data from yfinance ---
@@ -86,7 +88,6 @@ if tickers_input:
         
         # Save prediction
         if conn:
-            # Get actual close for today if available
             actual_today = df['Close'].iloc[-1] if not df.empty else None
             save_prediction(conn, ticker, pred, actual_today)
             
