@@ -6,7 +6,7 @@ from sklearn.linear_model import LinearRegression
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("🚀 Ultimate Stock Prediction Dashboard (Fully Safe & Fixed)")
+st.title(" Stock Prediction Dashboard ")
 
 # --- Fetch stock data ---
 def fetch_stock_data(ticker, days=30):
