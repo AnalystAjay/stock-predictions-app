@@ -15,11 +15,11 @@ from sklearn.metrics import mean_squared_error, r2_score
 RAW_CSV_URL = "https://raw.githubusercontent.com/AnalystAjay/stock-predictions-app/main/sp500.csv"
 
 MYSQL_CONFIG = {
-    "host": st.secrets["mysql"]["host"],
-    "port": st.secrets["mysql"]["port"],
-    "user": st.secrets["mysql"]["user"],
-    "password": st.secrets["mysql"]["password"],
-    "database": st.secrets["mysql"]["database"],
+    "host": st.secrets["mysql"]["Mysql@localhost"],
+    "port": st.secrets["mysql"]["3306"],
+    "user": st.secrets["mysql"]["root"],
+    "password": st.secrets["mysql"]["Sumo$%23"],
+    "database": st.secrets["mysql"]["sp500 database"],
 }
 
 MYSQL_TABLE = st.secrets["mysql"]["table"]
