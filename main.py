@@ -1,142 +1,90 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
 import yfinance as yf
-import plotly.graph_objects as go
+import pandas as pd
 import mysql.connector
 from mysql.connector import Error
-from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error, r2_score
+from datetime import datetime
+import plotly.express as px
 
-# -------------------------------------------------------
-# CONFIG
-# -------------------------------------------------------
-RAW_CSV_URL = "https://raw.githubusercontent.com/AnalystAjay/stock-predictions-app/main/sp500.csv"
+st.set_page_config(layout="wide")
+st.title("🚀 Pro Real-Time Stock Prediction Dashboard")
 
-MYSQL_CONFIG = {
-    "host": st.secrets["mysql"]["Mysql@localhost"],
-    "port": st.secrets["mysql"]["3306"],
-    "user": st.secrets["mysql"]["root"],
-    "password": st.secrets["mysql"]["Sumo$%23"],
-    "database": st.secrets["mysql"]["sp500 database"],
-}
-
-MYSQL_TABLE = st.secrets["mysql"]["table"]
-
-
-# -------------------------------------------------------
-# LOAD DATA LOGIC
-# -------------------------------------------------------
-def load_from_mysql():
+# --- MySQL connection ---
+def get_connection():
     try:
-        conn = mysql.connector.connect(**MYSQL_CONFIG)
-        query = f"SELECT * FROM {MYSQL_TABLE}"
-        df = pd.read_sql(query, conn)
-        conn.close()
-
-        if df.empty:
-            raise ValueError("MySQL table is empty")
-
-        st.success("Loaded data from MySQL successfully ✔️")
-        return df
-
-    except Exception as e:
-        st.warning(f"MySQL load failed: {e}")
+        conn = mysql.connector.connect(
+            host='localhost',
+            user='ajay',
+            password='Ajay@123',
+            database='stock_app'
+        )
+        return conn
+    except Error as e:
+        st.error(f"MySQL Connection Error: {e}")
         return None
 
-
-def load_from_csv():
-    try:
-        st.info("Loading fallback CSV from GitHub…")
-        df = pd.read_csv(RAW_CSV_URL)
-        st.success("Loaded CSV from GitHub successfully ✔️")
-        return df
-    except Exception as e:
-        st.error(f"Failed to load fallback CSV: {e}")
-        return None
-
-
-def ensure_datetime(df):
-    """Fixes date parsing warnings"""
-    if "Date" in df.columns:
-        try:
-            df["Date"] = pd.to_datetime(df["Date"], format="%Y-%m-%d", errors="coerce")
-        except:
-            df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+# --- Fetch stock data from yfinance ---
+def fetch_stock_data(ticker, days=30):
+    df = yf.download(ticker, period=f"{days}d", interval="1d")
+    df.reset_index(inplace=True)
+    df['Tomorrow'] = df['Close'].shift(-1)
+    df.dropna(inplace=True)
     return df
 
-
-# -------------------------------------------------------
-# FEATURE ENGINEERING
-# -------------------------------------------------------
-def add_features(df):
-    df = df.sort_values("Date")
-    df["Tomorrow"] = df["Close"].shift(-1)
-    df["Target"] = (df["Tomorrow"] > df["Close"]).astype(int)
-
-    df["MA5"] = df["Close"].rolling(5).mean()
-    df["MA20"] = df["Close"].rolling(20).mean()
-    df["Volatility"] = df["Close"].pct_change().rolling(10).std()
-
-    df = df.dropna()
-    return df
-
-
-# -------------------------------------------------------
-# TRAIN MODEL
-# -------------------------------------------------------
-def train_model(df):
-    X = df[["Close", "MA5", "MA20", "Volatility"]]
-    y = df["Tomorrow"]
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, shuffle=False
-    )
-
+# --- Train Linear Regression and predict next day ---
+def predict_next_day(df):
+    X = df.index.values.reshape(-1,1)
+    y = df['Close'].values
     model = LinearRegression()
-    model.fit(X_train, y_train)
+    model.fit(X, y)
+    next_day_index = [[len(df)]]
+    pred = model.predict(next_day_index)[0]
+    return round(pred,2), model
 
-    preds = model.predict(X_test)
-    mse = mean_squared_error(y_test, preds)
-    r2 = r2_score(y_test, preds)
+# --- Save prediction to MySQL ---
+def save_prediction(conn, ticker, pred, actual=None):
+    cursor = conn.cursor()
+    date_today = datetime.today().strftime('%Y-%m-%d')
+    accuracy = 1.0 if actual is None else round(1 - abs(pred-actual)/actual,4)
+    query = """
+    INSERT INTO predictions (stock_id, date, predicted_close, actual_close, model_name, accuracy)
+    VALUES (%s, %s, %s, %s, %s, %s)
+    """
+    cursor.execute(query, (ticker, date_today, pred, actual, 'LinearRegression', accuracy))
+    conn.commit()
 
-    return model, mse, r2, X_test.index, preds
-
-
-# -------------------------------------------------------
-# STREAMLIT UI
-# -------------------------------------------------------
-st.set_page_config(page_title="Stock Prediction Dashboard", layout="wide")
-st.title("📈 Stock Prediction Dashboard")
-st.write("Powered by MySQL + Streamlit + Machine Learning")
-
-# Load data
-df = load_from_mysql()
-if df is None:
-    df = load_from_csv()
-
-if df is None:
-    st.error("❌ No data available from MySQL or CSV. Cannot run the app.")
-    st.stop()
-
-df = ensure_datetime(df)
-df = add_features(df)
-
-# Show data preview
-with st.expander("🔍 View Raw Data"):
-    st.dataframe(df)
-
-# Train model
-model, mse, r2, idx, preds = train_model(df)
-
-st.subheader("📊 Model Performance")
-st.write(f"**MSE:** {mse:.4f}")
-st.write(f"**R² Score:** {r2:.4f}")
-
-# Plot predictions
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=df.loc[idx, "Date"], y=preds, name="Predicted"))
-fig.add_trace(go.Scatter(x=df.loc[idx, "Date"], y=df.loc[idx, "Tomorrow"], name="Actual"))
-fig.update_layout(title="Prediction vs Actual", xaxis_title="Date", yaxis_title="Price")
-st.plotly_chart(fig, use_container_width=True)
+# --- Main App ---
+tickers_input = st.text_input("Enter Stock Tickers (comma separated)", "^GSPC, AAPL, MSFT")
+if tickers_input:
+    tickers = [t.strip().upper() for t in tickers_input.split(",")]
+    
+    conn = get_connection()
+    
+    all_pred_data = []
+    for ticker in tickers:
+        df = fetch_stock_data(ticker)
+        st.subheader(f"📈 Last 30 Days: {ticker}")
+        st.dataframe(df[['Date','Open','High','Low','Close','Volume']])
+        
+        pred, model = predict_next_day(df)
+        st.metric(label=f"{ticker} Predicted Next Day Close", value=pred)
+        
+        if conn:
+            save_prediction(conn, ticker, pred)
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM predictions WHERE stock_id=%s ORDER BY date DESC", (ticker,))
+            rows = cursor.fetchall()
+            if rows:
+                df_pred = pd.DataFrame(rows, columns=[i[0] for i in cursor.description])
+                all_pred_data.append(df_pred)
+    
+    # --- Combined Interactive Chart ---
+    if all_pred_data:
+        combined_df = pd.concat(all_pred_data)
+        fig = px.line(combined_df, x="date", y="predicted_close", color="stock_id",
+                      title="📊 Predicted Close Prices for Multiple Stocks")
+        st.plotly_chart(fig, use_container_width=True)
+    
+    if conn:
+        conn.close()
