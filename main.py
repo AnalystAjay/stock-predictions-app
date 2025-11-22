@@ -2,30 +2,12 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import mysql.connector
-from mysql.connector import Error
 from sklearn.linear_model import LinearRegression
 from datetime import datetime
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 st.title(" Stock Prediction Dashboard (MySQL Fixed)")
-
-# --- MySQL connection ---
-def get_connection():
-    try:
-        conn = mysql.connector.connect(
-            host='Mysql@localhost',        # Use 127.0.0.1 instead of 'localhost'
-            user='root',
-            password='Sumo$%23',
-            database='sp500 database',
-            port=3306
-        )
-        if conn.is_connected():
-            st.success("🎉 Connected to MySQL successfully!")
-            return conn
-    except Error as e:
-        st.error(f"❌ Error connecting to MySQL: {e}")
-        return None
 
 # --- Fetch stock data from yfinance ---
 def fetch_stock_data(ticker, days=30):
