@@ -1,0 +1,65 @@
+{
+  "data_source": {
+    "database": "sp500",
+    "table": "sp500_data",
+    "connection": {
+      "host": "localhost",
+      "port": 3306,
+      "user": "root",
+      "password": "Sumo$%23"
+    },
+    "features": ["Close", "Volume", "Open", "High", "Low"]
+  },
+  "preprocessing": {
+    "removed_columns": ["Dividends", "Stock Splits"],
+    "added_columns": ["Tomorrow", "Target"]
+  },
+  "model_initial": {
+    "type": "RandomForestClassifier",
+    "parameters": {
+      "n_estimators": 100,
+      "min_samples_split": 100,
+      "random_state": 1
+    },
+    "train_split_method": "train on all rows except last 100",
+    "test_split_method": "test on last 100 rows",
+    "precision_score": "computed"
+  },
+  "backtest": {
+    "function": "backtest",
+    "parameters": {
+      "start": 2500,
+      "step": 250
+    },
+    "results": {
+      "predictions_value_counts": "computed",
+      "precision_score": "computed",
+      "target_distribution": "computed"
+    }
+  },
+  "feature_engineering": {
+    "horizons": [2, 5, 60, 250, 1000],
+    "new_predictors": [
+      "Close_Ratio_2", "Trend_2",
+      "Close_Ratio_5", "Trend_5",
+      "Close_Ratio_60", "Trend_60",
+      "Close_Ratio_250", "Trend_250",
+      "Close_Ratio_1000", "Trend_1000"
+    ]
+  },
+  "model_final": {
+    "type": "RandomForestClassifier",
+    "parameters": {
+      "n_estimators": 200,
+      "min_samples_split": 50,
+      "random_state": 1
+    },
+    "prediction_threshold": 0.6,
+    "results": {
+      "predictions_value_counts": "computed",
+      "precision_score": "computed",
+      "target_distribution": "computed",
+      "final_predictions": "DataFrame with Target and Predictions"
+    }
+  }
+}
