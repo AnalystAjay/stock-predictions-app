@@ -8,7 +8,7 @@ from datetime import datetime
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("🚀 Pro Real-Time Stock Prediction Dashboard")
+st.title("🚀 Pro Real-Time Stock Prediction Dashboard (Fixed)")
 
 # --- MySQL connection ---
 def get_connection():
@@ -28,18 +28,21 @@ def get_connection():
 def fetch_stock_data(ticker, days=30):
     df = yf.download(ticker, period=f"{days}d", interval="1d")
     df.reset_index(inplace=True)
-    df['Tomorrow'] = df['Close'].shift(-1)
-    df.dropna(inplace=True)
+    if not df.empty:
+        df['Tomorrow'] = df['Close'].shift(-1)
+        df.dropna(inplace=True)
     return df
 
 # --- Train Linear Regression and predict next day ---
 def predict_next_day(df):
+    if df.empty:
+        return None, None
     X = df.index.values.reshape(-1,1)
     y = df['Close'].values
     model = LinearRegression()
     model.fit(X, y)
     next_day_index = [[len(df)]]
-    pred = model.predict(next_day_index)[0]
+    pred = float(model.predict(next_day_index)[0])  # Convert to Python float
     return round(pred,2), model
 
 # --- Save prediction to MySQL ---
@@ -64,10 +67,19 @@ if tickers_input:
     all_pred_data = []
     for ticker in tickers:
         df = fetch_stock_data(ticker)
+        
+        if df.empty:
+            st.warning(f"No data available for {ticker}. Skipping.")
+            continue
+        
         st.subheader(f"📈 Last 30 Days: {ticker}")
         st.dataframe(df[['Date','Open','High','Low','Close','Volume']])
         
         pred, model = predict_next_day(df)
+        if pred is None:
+            st.warning(f"Prediction not available for {ticker}")
+            continue
+        
         st.metric(label=f"{ticker} Predicted Next Day Close", value=pred)
         
         if conn:
@@ -82,8 +94,10 @@ if tickers_input:
     # --- Combined Interactive Chart ---
     if all_pred_data:
         combined_df = pd.concat(all_pred_data)
-        fig = px.line(combined_df, x="date", y="predicted_close", color="stock_id",
-                      title="📊 Predicted Close Prices for Multiple Stocks")
+        fig = px.line(
+            combined_df, x="date", y="predicted_close", color="stock_id",
+            title="📊 Predicted Close Prices for Multiple Stocks"
+        )
         st.plotly_chart(fig, use_container_width=True)
     
     if conn:
