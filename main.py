@@ -1,13 +1,12 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import mysql.connector
 from sklearn.linear_model import LinearRegression
 from datetime import datetime
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title(" Stock Prediction Dashboard (MySQL Fixed)")
+st.title("🚀 Ultimate Stock Prediction Dashboard (No MySQL)")
 
 # --- Fetch stock data from yfinance ---
 def fetch_stock_data(ticker, days=30):
@@ -30,17 +29,11 @@ def predict_next_day(df):
     pred = float(model.predict(next_day_index)[0])
     return round(pred,2), model
 
-# --- Save prediction to MySQL ---
-def save_prediction(conn, ticker, pred, actual=None):
-    cursor = conn.cursor()
-    date_today = datetime.today().strftime('%Y-%m-%d')
-    accuracy = 1.0 if actual is None else round(1 - abs(pred-actual)/actual,4)
-    query = """
-    INSERT INTO predictions (stock_id, date, predicted_close, actual_close, model_name, accuracy)
-    VALUES (%s, %s, %s, %s, %s, %s)
-    """
-    cursor.execute(query, (ticker, date_today, pred, actual, 'LinearRegression', accuracy))
-    conn.commit()
+# --- Accuracy calculation ---
+def calculate_accuracy(pred, actual):
+    if actual is None:
+        return None
+    return round(1 - abs(pred - actual)/actual, 4)
 
 # --- Main App ---
 tickers_input = st.text_input("Enter Stock Tickers (comma separated)", "^GSPC, AAPL, MSFT")
@@ -48,9 +41,9 @@ days_input = st.number_input("Days of History", min_value=10, max_value=365, val
 
 if tickers_input:
     tickers = [t.strip().upper() for t in tickers_input.split(",")]
-    conn = get_connection()
     
     all_pred_data = []
+    
     for ticker in tickers:
         df = fetch_stock_data(ticker, days_input)
         
@@ -66,41 +59,17 @@ if tickers_input:
             st.warning(f"Prediction not available for {ticker}")
             continue
         
-        st.metric(label=f"{ticker} Predicted Next Day Close", value=pred)
+        actual_today = df['Close'].iloc[-1] if not df.empty else None
+        accuracy = calculate_accuracy(pred, actual_today)
         
-        # Save prediction
-        if conn:
-            actual_today = df['Close'].iloc[-1] if not df.empty else None
-            save_prediction(conn, ticker, pred, actual_today)
-            
-            # Fetch all predictions for chart
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM predictions WHERE stock_id=%s ORDER BY date ASC", (ticker,))
-            rows = cursor.fetchall()
-            if rows:
-                df_pred = pd.DataFrame(rows, columns=[i[0] for i in cursor.description])
-                all_pred_data.append(df_pred)
+        st.metric(label=f"{ticker} Predicted Next Day Close", value=pred, delta=f"Accuracy: {accuracy*100 if accuracy else 'N/A'}%")
+        
+        # Prepare dataframe for plotting
+        df_plot = df[['Date','Close']].copy()
+        df_plot.rename(columns={'Close':'Actual'}, inplace=True)
+        df_plot['Predicted'] = list(model.predict(df.index.values.reshape(-1,1)))
+        df_plot['stock_id'] = ticker
+        all_pred_data.append(df_plot)
     
     # --- Interactive Multi-Line Chart ---
-    if all_pred_data:
-        fig = go.Figure()
-        for df_pred in all_pred_data:
-            ticker_name = df_pred['stock_id'].iloc[0]
-            # Predicted line
-            fig.add_trace(go.Scatter(
-                x=df_pred['date'], y=df_pred['predicted_close'],
-                mode='lines+markers', name=f"{ticker_name} Predicted"
-            ))
-            # Actual line if available
-            if 'actual_close' in df_pred.columns:
-                fig.add_trace(go.Scatter(
-                    x=df_pred['date'], y=df_pred['actual_close'],
-                    mode='lines+markers', name=f"{ticker_name} Actual"
-                ))
-        fig.update_layout(title="📊 Predicted vs Actual Close Prices",
-                          xaxis_title="Date", yaxis_title="Close Price",
-                          hovermode="x unified")
-        st.plotly_chart(fig, use_container_width=True)
-    
-    if conn:
-        conn.close()
+    if
