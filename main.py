@@ -1,151 +1,98 @@
-# main.py — MySQL + CSV fallback (FIXED VERSION)
-
-import os
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime
+import yfinance as yf
+import plotly.graph_objects as go
+import mysql.connector
+from mysql.connector import Error
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
-import plotly.graph_objects as go
-from sqlalchemy import create_engine
-from sqlalchemy.exc import SQLAlchemyError
 
-# ----------------------------------------------------
-# Streamlit Config
-# ----------------------------------------------------
-st.set_page_config(page_title="Stock Prediction App (MySQL)", layout="wide")
-st.title("📈 Stock Prediction App (MySQL + CSV fallback)")
+# -------------------------------------------------------
+# CONFIG
+# -------------------------------------------------------
+RAW_CSV_URL = "https://raw.githubusercontent.com/AnalystAjay/stock-predictions-app/main/sp500.csv"
 
-st.write("This app loads stock data from **MySQL**. If MySQL fails, it will load fallback CSV from GitHub.")
+MYSQL_CONFIG = {
+    "host": st.secrets["mysql"]["host"],
+    "port": st.secrets["mysql"]["port"],
+    "user": st.secrets["mysql"]["user"],
+    "password": st.secrets["mysql"]["password"],
+    "database": st.secrets["mysql"]["database"],
+}
 
-# ----------------------------------------------------
-# FIXED: Correct fallback CSV URL
-# ----------------------------------------------------
-FALLBACK_CSV = "https://raw.githubusercontent.com/AnalystAjay/stock-predictions-app/main/sp500.csv"
+MYSQL_TABLE = st.secrets["mysql"]["table"]
 
-# ----------------------------------------------------
-# Database Credentials (Environment Variables)
-# ----------------------------------------------------
-DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_PORT = os.environ.get("DB_PORT", "3306")
-DB_USER = os.environ.get("DB_USER", "root")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "")
-DB_NAME = os.environ.get("DB_NAME", "sp500")
-DB_TABLE = os.environ.get("DB_TABLE", "")
 
-def make_engine():
-    url = f"mysql+mysqlconnector://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    return create_engine(url, connect_args={"connect_timeout": 5})
-
-# ----------------------------------------------------
-# MySQL Loader
-# ----------------------------------------------------
-@st.cache_data
-def load_data_from_mysql():
+# -------------------------------------------------------
+# LOAD DATA LOGIC
+# -------------------------------------------------------
+def load_from_mysql():
     try:
-        engine = make_engine()
+        conn = mysql.connector.connect(**MYSQL_CONFIG)
+        query = f"SELECT * FROM {MYSQL_TABLE}"
+        df = pd.read_sql(query, conn)
+        conn.close()
+
+        if df.empty:
+            raise ValueError("MySQL table is empty")
+
+        st.success("Loaded data from MySQL successfully ✔️")
+        return df
+
     except Exception as e:
-        return None, f"engine_error:{e}"
+        st.warning(f"MySQL load failed: {e}")
+        return None
 
-    # Try user-provided table first, then fallback names
-    candidates = []
-    if DB_TABLE.strip():
-        candidates.append(DB_TABLE.strip())
-    candidates.extend(["sp500_data", "sp500", "stock_data", "stocks", "sp500_table"])
 
-    seen = set()
-    candidates = [c for c in candidates if not (c in seen or seen.add(c))]
-
-    for tbl in candidates:
-        try:
-            df = pd.read_sql(f"SELECT * FROM `{tbl}` LIMIT 1000000", con=engine)
-            if df is not None and len(df) > 0:
-                return df, f"mysql:{tbl}"
-        except Exception:
-            continue
-
-    return None, "no_table_found"
-
-# ----------------------------------------------------
-# CSV Fallback Loader (GitHub RAW)
-# ----------------------------------------------------
-def load_fallback_csv(path=FALLBACK_CSV):
+def load_from_csv():
     try:
-        return pd.read_csv(path)
-    except:
-        return pd.read_csv(path, sep="\t")
+        st.info("Loading fallback CSV from GitHub…")
+        df = pd.read_csv(RAW_CSV_URL)
+        st.success("Loaded CSV from GitHub successfully ✔️")
+        return df
+    except Exception as e:
+        st.error(f"Failed to load fallback CSV: {e}")
+        return None
 
-# ----------------------------------------------------
-# Prepare Data
-# ----------------------------------------------------
-def normalize_and_prepare(df):
-    df = df.copy()
-    df.columns = [c.strip() for c in df.columns]
 
-    # Find date column
-    date_col = None
-    for c in df.columns:
-        if c.lower() == "date" or "date" in c.lower():
-            date_col = c
-            break
+def ensure_datetime(df):
+    """Fixes date parsing warnings"""
+    if "Date" in df.columns:
+        try:
+            df["Date"] = pd.to_datetime(df["Date"], format="%Y-%m-%d", errors="coerce")
+        except:
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    return df
 
-    if date_col:
-        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-        df = df.sort_values(date_col).set_index(date_col)
 
-    # Find Close column
-    close_col = None
-    for cand in ["Close", "close", "Adj Close", "Adj_Close", "ClosePrice", "close_price"]:
-        if cand in df.columns:
-            close_col = cand
-            break
-
-    if close_col is None:
-        for c in df.columns:
-            if c.lower() == "close":
-                close_col = c
-                break
-
-    if close_col is None:
-        raise ValueError("No 'Close' column found in dataset.")
-
-    if close_col != "Close":
-        df = df.rename(columns={close_col: "Close"})
-
-    # Ensure base columns exist
-    for col in ["Open", "High", "Low", "Volume"]:
-        if col not in df.columns:
-            df[col] = np.nan
-
-    # Convert numeric
-    for col in ["Open", "High", "Low", "Close", "Volume"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # Features
+# -------------------------------------------------------
+# FEATURE ENGINEERING
+# -------------------------------------------------------
+def add_features(df):
+    df = df.sort_values("Date")
     df["Tomorrow"] = df["Close"].shift(-1)
     df["Target"] = (df["Tomorrow"] > df["Close"]).astype(int)
-    df["MA_5"] = df["Close"].rolling(5).mean()
-    df["MA_10"] = df["Close"].rolling(10).mean()
-    df["Return"] = df["Close"].pct_change()
+
+    df["MA5"] = df["Close"].rolling(5).mean()
+    df["MA20"] = df["Close"].rolling(20).mean()
+    df["Volatility"] = df["Close"].pct_change().rolling(10).std()
 
     df = df.dropna()
     return df
 
-# ----------------------------------------------------
-# Train Model
-# ----------------------------------------------------
-def train_model(df):
-    features = ["Open", "High", "Low", "Close", "Volume", "MA_5", "MA_10", "Return"]
-    features = [f for f in features if f in df.columns]
 
-    X = df[features]
+# -------------------------------------------------------
+# TRAIN MODEL
+# -------------------------------------------------------
+def train_model(df):
+    X = df[["Close", "MA5", "MA20", "Volatility"]]
     y = df["Tomorrow"]
 
-    split = int(len(X) * 0.8)
-    X_train, X_test = X.iloc[:split], X.iloc[split:]
-    y_train, y_test = y.iloc[:split], y.iloc[split:]
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, shuffle=False
+    )
 
     model = LinearRegression()
     model.fit(X_train, y_train)
@@ -154,63 +101,42 @@ def train_model(df):
     mse = mean_squared_error(y_test, preds)
     r2 = r2_score(y_test, preds)
 
-    return model, X_test.index, preds, mse, r2
+    return model, mse, r2, X_test.index, preds
 
-# ----------------------------------------------------
-# Main Execution
-# ----------------------------------------------------
-st.info("Attempting to load data from MySQL...")
 
-with st.spinner("Connecting to MySQL..."):
-    df, status = load_data_from_mysql()
+# -------------------------------------------------------
+# STREAMLIT UI
+# -------------------------------------------------------
+st.set_page_config(page_title="Stock Prediction Dashboard", layout="wide")
+st.title("📈 Stock Prediction Dashboard")
+st.write("Powered by MySQL + Streamlit + Machine Learning")
+
+# Load data
+df = load_from_mysql()
+if df is None:
+    df = load_from_csv()
 
 if df is None:
-    st.warning(f"MySQL load failed: {status}. Loading fallback CSV...")
-    try:
-        df = load_fallback_csv()
-        source = "csv_fallback"
-        st.success("Loaded fallback CSV successfully!")
-    except Exception as e:
-        st.error(f"CSV load failed: {e}")
-        st.stop()
-else:
-    source = status
-    st.success(f"Loaded data from {source}")
-
-# Prepare
-try:
-    df_prepared = normalize_and_prepare(df)
-except Exception as e:
-    st.error(f"Data preparation failed: {e}")
-    st.write("Available columns:", df.columns)
+    st.error("❌ No data available from MySQL or CSV. Cannot run the app.")
     st.stop()
 
-st.subheader("Data preview")
-st.dataframe(df_prepared.head())
+df = ensure_datetime(df)
+df = add_features(df)
 
-# Train
-with st.spinner("Training model..."):
-    model, pred_idx, preds, mse, r2 = train_model(df_prepared)
+# Show data preview
+with st.expander("🔍 View Raw Data"):
+    st.dataframe(df)
 
-st.subheader("Model Metrics")
-c1, c2 = st.columns(2)
-c1.metric("MSE", f"{mse:.4f}")
-c2.metric("R² Score", f"{r2:.4f}")
+# Train model
+model, mse, r2, idx, preds = train_model(df)
 
-# Plot
-st.subheader("Predicted vs Actual")
+st.subheader("📊 Model Performance")
+st.write(f"**MSE:** {mse:.4f}")
+st.write(f"**R² Score:** {r2:.4f}")
+
+# Plot predictions
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=pred_idx, y=df_prepared.loc[pred_idx, "Tomorrow"], name="Actual"))
-fig.add_trace(go.Scatter(x=pred_idx, y=preds, name="Predicted"))
-fig.update_layout(height=600)
+fig.add_trace(go.Scatter(x=df.loc[idx, "Date"], y=preds, name="Predicted"))
+fig.add_trace(go.Scatter(x=df.loc[idx, "Date"], y=df.loc[idx, "Tomorrow"], name="Actual"))
+fig.update_layout(title="Prediction vs Actual", xaxis_title="Date", yaxis_title="Price")
 st.plotly_chart(fig, use_container_width=True)
-
-# Predict next day
-st.subheader("Next Day Prediction")
-last_row = df_prepared.iloc[-1:]
-features = [f for f in ["Open","High","Low","Close","Volume","MA_5","MA_10","Return"] if f in last_row]
-next_pred = model.predict(last_row[features])[0]
-
-st.success(f"Predicted next day Close Price: {next_pred:.2f}")
-
-st.info(f"Data loaded from: {source}")
