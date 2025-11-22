@@ -1,0 +1,14 @@
+import mysql.connector
+import pandas as pd
+
+def load_data():
+    conn = mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="Sumo$%23",
+        database="sp500"
+    )
+    query = "SELECT * FROM sp500;"
+    df = pd.read_sql(query, conn)
+    conn.close()
+    return df
