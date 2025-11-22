@@ -14,7 +14,7 @@ st.title(" Stock Prediction Dashboard (MySQL Fixed)")
 def get_connection():
     try:
         conn = mysql.connector.connect(
-            host='127.0.0.1',        # Use 127.0.0.1 instead of 'localhost'
+            host='Mysql@localhost',        # Use 127.0.0.1 instead of 'localhost'
             user='root',
             password='Sumo$%23',
             database='sp500 database',
