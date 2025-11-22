@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 st.set_page_config(layout="wide")
 st.title("🚀 Ultimate Stock Prediction Dashboard (Fully Safe & Fixed)")
 
-# --- Fetch stock data from yfinance ---
+# --- Fetch stock data ---
 def fetch_stock_data(ticker, days=30):
     df = yf.download(ticker, period=f"{days}d", interval="1d")
     df.reset_index(inplace=True)
@@ -17,17 +17,18 @@ def fetch_stock_data(ticker, days=30):
         df.dropna(inplace=True)
     return df
 
-# --- Predict next day using Linear Regression with train/test split ---
+# --- Predict next day using train/test split ---
 def predict_next_day(df, split_ratio=0.9):
     if df.empty:
         return None, None, None
+    
     split_index = int(len(df) * split_ratio)
     
-    # Training set
+    # Training
     X_train = np.arange(split_index).reshape(-1,1)
     y_train = df['Close'].iloc[:split_index].values
     
-    # Test set
+    # Test
     X_test = np.arange(split_index, len(df)).reshape(-1,1)
     y_test = df['Close'].iloc[split_index:].values
     
@@ -41,7 +42,8 @@ def predict_next_day(df, split_ratio=0.9):
     # Accuracy on last test point
     accuracy = None
     if len(y_test) > 0:
-        accuracy = 1 - abs(model.predict(X_test)[-1] - y_test[-1]) / y_test[-1]
+        pred_test = model.predict(X_test)
+        accuracy = 1 - abs(pred_test[-1] - y_test[-1]) / y_test[-1]
     
     return pred_next, model, accuracy
 
@@ -67,11 +69,11 @@ if tickers_input:
             st.warning(f"Prediction not available for {ticker}")
             continue
         
-        # ✅ Safe metric display
+        # --- Safe metric display (TypeError & ValueError fix) ---
         if accuracy is None or (isinstance(accuracy, float) and np.isnan(accuracy)):
             accuracy_display = "N/A"
         else:
-            accuracy_display = f"{accuracy*100:.2f}%"
+            accuracy_display = f"{float(accuracy)*100:.2f}%"
         
         st.metric(label=f"{ticker} Predicted Next Day Close", value=pred, delta=f"Accuracy: {accuracy_display}")
         
