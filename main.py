@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 import datetime
 
 st.set_page_config(layout="wide")
-st.title("🚀 Professional Stock Dashboard (Candlestick + Prediction)")
+st.title(" Real Time Stock Dashboard Prediction")
 
 # --- Session state for auto-refresh ---
 if 'last_update' not in st.session_state:
