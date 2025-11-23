@@ -30,18 +30,18 @@ def fetch_stock_data(ticker, days=60):
 def predict_next_day(df, split_ratio=0.9):
     if df.empty:
         return None, None, None
-    split_index = int(len(df)*split_ratio)
-    X_train = np.arange(split_index).reshape(-1,1)
+    split_index = int(len(df) * split_ratio)
+    X_train = np.arange(split_index).reshape(-1, 1)
     y_train = df['Close'].iloc[:split_index].values
-    X_test = np.arange(split_index,len(df)).reshape(-1,1)
+    X_test = np.arange(split_index, len(df)).reshape(-1, 1)
     y_test = df['Close'].iloc[split_index:].values
     model = LinearRegression()
     model.fit(X_train, y_train)
     pred_next = float(model.predict(np.array([[len(df)]]))[0])
     accuracy = None
-    if len(y_test)>0:
+    if len(y_test) > 0:
         pred_test = model.predict(X_test)
-        accuracy = 1 - abs(pred_test[-1]-y_test[-1])/y_test[-1]
+        accuracy = 1 - abs(pred_test[-1] - y_test[-1]) / y_test[-1]
     return pred_next, model, accuracy
 
 # --- Main App ---
@@ -59,7 +59,7 @@ if tickers_input:
             continue
 
         st.subheader(f"📈 Last {days_input} Days Data: {ticker}")
-        st.dataframe(df[['Date','Open','High','Low','Close','Volume']])
+        st.dataframe(df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']])
 
         pred, model, accuracy = predict_next_day(df)
         if pred is None:
@@ -67,28 +67,67 @@ if tickers_input:
             continue
 
         # Safe metric display
-        if accuracy is None or (isinstance(accuracy,float) and np.isnan(accuracy)):
+        if accuracy is None or (isinstance(accuracy, float) and np.isnan(accuracy)):
             accuracy_display = "N/A"
         else:
             accuracy_display = f"{float(accuracy)*100:.2f}%"
         st.metric(label=f"{ticker} Predicted Next Day Close", value=pred, delta=f"Accuracy: {accuracy_display}")
 
-        # --- Candlestick Chart ---
+        # --- Candlestick + Predicted vs Actual + Volume ---
+        df['Predicted'] = list(model.predict(np.arange(len(df)).reshape(-1,1)))
+
         fig = go.Figure()
+
+        # Candlestick
         fig.add_trace(go.Candlestick(
             x=df['Date'],
-            open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+            open=df['Open'],
+            high=df['High'],
+            low=df['Low'],
+            close=df['Close'],
             name="Candlestick"
         ))
-        # --- Predicted vs Actual Line ---
-        X_numeric = np.arange(len(df)).reshape(-1,1)
-        df['Predicted'] = list(model.predict(X_numeric))
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['Close'], mode='lines', name='Actual Close', line=dict(color='blue')))
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['Predicted'], mode='lines', name='Predicted Close', line=dict(color='orange', dash='dot')))
-        # --- Volume bars ---
-        fig.add_trace(go.Bar(x=df['Date'], y=df['Volume'], name='Volume', yaxis='y2', opacity=0.3))
+
+        # Actual Close line
+        fig.add_trace(go.Scatter(
+            x=df['Date'],
+            y=df['Close'],
+            mode='lines',
+            name='Actual Close',
+            line=dict(color='blue')
+        ))
+
+        # Predicted Close line
+        fig.add_trace(go.Scatter(
+            x=df['Date'],
+            y=df['Predicted'],
+            mode='lines',
+            name='Predicted Close',
+            line=dict(color='orange', dash='dot')
+        ))
+
+        # Volume bars
+        fig.add_trace(go.Bar(
+            x=df['Date'],
+            y=df['Volume'],
+            name='Volume',
+            yaxis='y2',
+            opacity=0.3
+        ))
+
         # Layout
         fig.update_layout(
             title=f"{ticker} Candlestick + Predicted vs Actual Close",
             xaxis_title="Date",
-            yaxis_title="_
+            yaxis_title="Price",
+            yaxis2=dict(title="Volume", overlaying='y', side='right', showgrid=False),
+            legend=dict(x=0, y=1.1, orientation='h'),
+            hovermode='x unified'
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+# --- Auto-refresh using session state ---
+if (datetime.datetime.now() - st.session_state.last_update.to_pydatetime()).total_seconds() > refresh_interval:
+    st.session_state.last_update = pd.Timestamp.now()
+    st.experimental_rerun()
